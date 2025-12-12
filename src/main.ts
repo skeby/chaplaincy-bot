@@ -27,7 +27,9 @@ const inConfig = {
 // );
 // bot.use(rateLimitHandler());
 
-bot.on(message("text"), message_event);
+bot.start(start_cmd);
+bot.on(message(), message_event);
+bot.on("channel_post", message_event);
 
 console.log(NODE_ENV);
 
