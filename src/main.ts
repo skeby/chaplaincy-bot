@@ -5,6 +5,7 @@ import { rateLimitHandler } from "./middlewares/handlers/rate-limit.handler";
 import telegrafThrottler from "telegraf-throttler";
 import start_cmd from "./middlewares/commands/start.cmd";
 import message_event from "./middlewares/events/message.event";
+import bot_added_event from "./middlewares/events/bot-added.event";
 import {
   NODE_ENV,
   WEBHOOK_DOMAIN,
@@ -20,16 +21,18 @@ const inConfig = {
   strategy: Bottleneck.strategy.LEAK, // Drop jobs if throttler is not ready
 };
 
-// bot.use(
-//   telegrafThrottler({
-//     in: inConfig,
-//   })
-// );
-// bot.use(rateLimitHandler());
+bot.use(
+  telegrafThrottler({
+    in: inConfig,
+  })
+);
+bot.use(rateLimitHandler());
 
 bot.start(start_cmd);
 bot.on(message(), message_event);
 bot.on("channel_post", message_event);
+bot.on("my_chat_member", bot_added_event);
+
 
 console.log(NODE_ENV);
 

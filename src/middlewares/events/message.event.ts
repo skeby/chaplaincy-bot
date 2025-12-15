@@ -94,10 +94,10 @@ const message_event = async (ctx: AppContext) => {
 
   // detect original source when a message was forwarded
   const originalChatId =
-    msg.forward_from_chat?.id ?? // origin was a channel/group
-    msg.forward_from?.id ?? // origin was a private user (user id == private chat id)
+    msg?.forward_from_chat?.id ?? // origin was a channel/group
+    msg?.forward_from?.id ?? // origin was a private user (user id == private chat id)
     null;
-  const originalChatTitle = msg.forward_from_chat?.title ?? null;
+  const originalChatTitle = msg?.forward_from_chat?.title ?? null;
 
   if (originalChatId) {
     console.log("forwarded from chat title:", originalChatTitle);
