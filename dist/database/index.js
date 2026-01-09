@@ -20,7 +20,7 @@ const connectToDatabase = () => __awaiter(void 0, void 0, void 0, function* () {
         if (!env_config_1.MONGODB_URI) {
             throw new Error("MONGODB_URI is not defined");
         }
-        yield mongoose_1.default.connect(env_config_1.MONGODB_URI);
+        yield mongoose_1.default.connect(`${env_config_1.MONGODB_URI}/chaplaincy-bot?retryWrites=true&w=majority&appName=Cluster0`);
         console.log("Connected to MongoDB");
     }
     catch (error) {
