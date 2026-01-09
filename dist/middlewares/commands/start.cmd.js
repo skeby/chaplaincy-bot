@@ -10,8 +10,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const start_cmd = (ctx) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
-    yield ctx.reply("Active!");
-    console.log("Chat ID:", (_a = ctx.chat) === null || _a === void 0 ? void 0 : _a.id);
+    yield ctx.reply("Hi there. This is the Covenant University Chaplaincy Bot that helps to disseminate information from the student chaplaincy channel.");
 });
 exports.default = start_cmd;
