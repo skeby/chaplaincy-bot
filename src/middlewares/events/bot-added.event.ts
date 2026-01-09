@@ -1,31 +1,65 @@
 import { AppContext } from "../../context";
+import { ChatModel } from "../../database/models/chat.model";
 
 const bot_added_event = async (ctx: AppContext) => {
-  // Telegraf provides membership updates under `my_chat_member` (or `chat_member` in some updates)
+  // Telegraf provides membership updates under `my_chat_member`
   const update = (ctx as any).update ?? {};
-  const memberUpdate =
-    update.my_chat_member ??
-    update.chat_member ??
-    (ctx as any).my_chat_member ??
-    (ctx as any).chat_member;
+  const memberUpdate = update.my_chat_member ?? (ctx as any).my_chat_member;
+
   if (!memberUpdate) return;
 
-  const newMember =
-    memberUpdate.new_chat_member ?? memberUpdate.new_member ?? null;
+  const newMember = memberUpdate.new_chat_member;
   if (!newMember) return;
 
   // Only care when the update is about a bot (i.e., the bot itself)
-  if (!newMember.user?.is_bot) return;
+  // `my_chat_member` updates are always about the bot itself unless it's a `chat_member` update.
+  // Double check if we need to filter for self, but usually my_chat_member is for me.
+  // However, verifying it is the bot user doesn't hurt.
+  // Actually, memberUpdate.from is the user who triggered the change, new_chat_member.user is the user who changed status.
+  // For `my_chat_member`, the user whose status changed is the bot itself.
 
-  // We're interested when the bot becomes a member or administrator (i.e., it was added)
+  // Statuses: 'member', 'administrator' (joined/added/promoted)
+  // 'left', 'kicked' (left/removed)
+  // 'restricted' (still a member usually, but limited)
+
   const status = newMember.status;
-  if (status !== "member" && status !== "administrator") return;
+  const chatId = memberUpdate.chat?.id;
+  const chatTitle = memberUpdate.chat?.title;
+  const chatType = memberUpdate.chat?.type;
 
-  const chatId = memberUpdate.chat?.id ?? ctx.chat?.id;
-  const chatTitle = memberUpdate.chat?.title ?? null;
+  if (!chatId) return;
 
-  console.log("Bot added to chat id:", chatId);
-  if (chatTitle) console.log("Chat title:", chatTitle);
+  console.log(`Bot membership update in chat ${chatId}: ${status}`);
+
+  try {
+    if (status === "member" || status === "administrator" || status === "restricted") {
+      await ChatModel.updateOne(
+        { chatId },
+        {
+          $set: {
+            chatId,
+            title: chatTitle,
+            type: chatType,
+            isMember: true,
+          },
+        },
+        { upsert: true }
+      );
+      console.log(`Updated chat ${chatId} status to MEMBER`);
+    } else if (status === "left" || status === "kicked") {
+      await ChatModel.updateOne(
+        { chatId },
+        {
+          $set: {
+            isMember: false,
+          },
+        }
+      );
+      console.log(`Updated chat ${chatId} status to NOT MEMBER`);
+    }
+  } catch (err) {
+    console.error(`Failed to update DB for chat ${chatId}`, err);
+  }
 };
 
 export default bot_added_event;

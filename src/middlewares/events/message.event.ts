@@ -1,5 +1,6 @@
 import { AppContext } from "../../context";
-import { SOURCE_CHAT_IDS, DESTINATION_CHAT_IDS } from "../../config/env.config";
+import { SOURCE_CHAT_IDS } from "../../config/env.config";
+import { ChatModel } from "../../database/models/chat.model";
 
 type BufferEntry = {
   msgs: any[];
@@ -9,6 +10,37 @@ type BufferEntry = {
 
 const MEDIA_GROUP_WAIT = 700; // ms to collect album parts
 const mediaGroupBuffer = new Map<string, BufferEntry>();
+
+const getDestinationChatIds = async (): Promise<number[]> => {
+  try {
+    const chats = await ChatModel.find({
+      isMember: true,
+      type: { $in: ["group", "supergroup"] },
+    }).select("chatId");
+    return chats.map((c) => c.chatId);
+  } catch (error) {
+    console.error("Failed to fetch destination chats:", error);
+    return [];
+  }
+};
+
+const handleSendError = async (destId: number, error: any) => {
+  console.error(`Failed to send to ${destId}`, error);
+  // Check if error implies bot was kicked or chat not found
+  const errStr = String(error);
+  if (
+    errStr.includes("Forbidden: bot was kicked") ||
+    errStr.includes("chat not found") ||
+    errStr.includes("Forbidden: user is deactivated")
+  ) {
+    try {
+      await ChatModel.updateOne({ chatId: destId }, { $set: { isMember: false } });
+      console.log(`Marked chat ${destId} as not member due to error.`);
+    } catch (dbErr) {
+      console.error(`Failed to update DB for chat ${destId}`, dbErr);
+    }
+  }
+};
 
 const flushMediaGroup = async (key: string) => {
   const entry = mediaGroupBuffer.get(key);
@@ -21,14 +53,16 @@ const flushMediaGroup = async (key: string) => {
     (m) => (m.photo && m.photo.length > 0) || m.video
   );
 
+  const destinationChatIds = await getDestinationChatIds();
+
   if (!allSupported) {
     // fallback: forward each part individually
-    const forwardPromises = DESTINATION_CHAT_IDS.flatMap((destId) =>
+    const forwardPromises = destinationChatIds.flatMap((destId) =>
       msgs.map(async (m) => {
         try {
           await entry.telegram.forwardMessage(destId, m.chat.id, m.message_id);
         } catch (err) {
-          console.error(`Failed to forward media part to ${destId}`, err);
+          await handleSendError(destId, err);
         }
       })
     );
@@ -64,7 +98,7 @@ const flushMediaGroup = async (key: string) => {
     .filter(Boolean) as Array<any>;
 
   // Send as a group to each destination
-  const sendPromises = DESTINATION_CHAT_IDS.map(async (destId) => {
+  const sendPromises = destinationChatIds.map(async (destId) => {
     try {
       await entry.telegram.sendMediaGroup(destId, mediaArray);
     } catch (err) {
@@ -77,7 +111,7 @@ const flushMediaGroup = async (key: string) => {
           )
         );
       } catch (err2) {
-        console.error(`Fallback forwarding also failed for ${destId}`, err2);
+        await handleSendError(destId, err2);
       }
     }
   });
@@ -135,11 +169,13 @@ const message_event = async (ctx: AppContext) => {
   const messageId = msg.message_id;
   if (!messageId) return;
 
-  const forwardPromises = DESTINATION_CHAT_IDS.map(async (destId) => {
+  const destinationChatIds = await getDestinationChatIds();
+
+  const forwardPromises = destinationChatIds.map(async (destId) => {
     try {
       await ctx.telegram.forwardMessage(destId, chatId, messageId);
     } catch (error) {
-      console.error(`Failed to forward to ${destId}`, error);
+      await handleSendError(destId, error);
     }
   });
 

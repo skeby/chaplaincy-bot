@@ -12,6 +12,8 @@ export const SOURCE_CHAT_IDS =
     ?.split(",")
     ?.map((id) => Number(id.trim()) || null)
     ?.filter((id) => Number.isInteger(id)) || [];
+
+export const MONGODB_URI = process.env.MONGODB_URI as string;
 export const DESTINATION_CHAT_IDS =
   (process.env.DESTINATION_CHAT_IDS as string)
     ?.split(",")

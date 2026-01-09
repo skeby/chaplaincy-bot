@@ -10,8 +10,38 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const env_config_1 = require("../../config/env.config");
+const chat_model_1 = require("../../database/models/chat.model");
 const MEDIA_GROUP_WAIT = 700; // ms to collect album parts
 const mediaGroupBuffer = new Map();
+const getDestinationChatIds = () => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const chats = yield chat_model_1.ChatModel.find({
+            isMember: true,
+            type: { $in: ["group", "supergroup"] },
+        }).select("chatId");
+        return chats.map((c) => c.chatId);
+    }
+    catch (error) {
+        console.error("Failed to fetch destination chats:", error);
+        return [];
+    }
+});
+const handleSendError = (destId, error) => __awaiter(void 0, void 0, void 0, function* () {
+    console.error(`Failed to send to ${destId}`, error);
+    // Check if error implies bot was kicked or chat not found
+    const errStr = String(error);
+    if (errStr.includes("Forbidden: bot was kicked") ||
+        errStr.includes("chat not found") ||
+        errStr.includes("Forbidden: user is deactivated")) {
+        try {
+            yield chat_model_1.ChatModel.updateOne({ chatId: destId }, { $set: { isMember: false } });
+            console.log(`Marked chat ${destId} as not member due to error.`);
+        }
+        catch (dbErr) {
+            console.error(`Failed to update DB for chat ${destId}`, dbErr);
+        }
+    }
+});
 const flushMediaGroup = (key) => __awaiter(void 0, void 0, void 0, function* () {
     const entry = mediaGroupBuffer.get(key);
     if (!entry)
@@ -20,14 +50,15 @@ const flushMediaGroup = (key) => __awaiter(void 0, void 0, void 0, function* () 
     const msgs = entry.msgs.sort((a, b) => a.message_id - b.message_id);
     // Check if all are photos/videos (sendMediaGroup supports only photo/video)
     const allSupported = msgs.every((m) => (m.photo && m.photo.length > 0) || m.video);
+    const destinationChatIds = yield getDestinationChatIds();
     if (!allSupported) {
         // fallback: forward each part individually
-        const forwardPromises = env_config_1.DESTINATION_CHAT_IDS.flatMap((destId) => msgs.map((m) => __awaiter(void 0, void 0, void 0, function* () {
+        const forwardPromises = destinationChatIds.flatMap((destId) => msgs.map((m) => __awaiter(void 0, void 0, void 0, function* () {
             try {
                 yield entry.telegram.forwardMessage(destId, m.chat.id, m.message_id);
             }
             catch (err) {
-                console.error(`Failed to forward media part to ${destId}`, err);
+                yield handleSendError(destId, err);
             }
         })));
         yield Promise.allSettled(forwardPromises);
@@ -51,7 +82,7 @@ const flushMediaGroup = (key) => __awaiter(void 0, void 0, void 0, function* () 
     })
         .filter(Boolean);
     // Send as a group to each destination
-    const sendPromises = env_config_1.DESTINATION_CHAT_IDS.map((destId) => __awaiter(void 0, void 0, void 0, function* () {
+    const sendPromises = destinationChatIds.map((destId) => __awaiter(void 0, void 0, void 0, function* () {
         try {
             yield entry.telegram.sendMediaGroup(destId, mediaArray);
         }
@@ -62,7 +93,7 @@ const flushMediaGroup = (key) => __awaiter(void 0, void 0, void 0, function* () 
                 yield Promise.all(msgs.map((m) => entry.telegram.forwardMessage(destId, m.chat.id, m.message_id)));
             }
             catch (err2) {
-                console.error(`Fallback forwarding also failed for ${destId}`, err2);
+                yield handleSendError(destId, err2);
             }
         }
     }));
@@ -74,8 +105,8 @@ const message_event = (ctx) => __awaiter(void 0, void 0, void 0, function* () {
     if (!msg)
         return;
     // detect original source when a message was forwarded
-    const originalChatId = (_f = (_d = (_c = msg.forward_from_chat) === null || _c === void 0 ? void 0 : _c.id) !== null && _d !== void 0 ? _d : (_e = msg.forward_from) === null || _e === void 0 ? void 0 : _e.id) !== null && _f !== void 0 ? _f : null;
-    const originalChatTitle = (_h = (_g = msg.forward_from_chat) === null || _g === void 0 ? void 0 : _g.title) !== null && _h !== void 0 ? _h : null;
+    const originalChatId = (_f = (_d = (_c = msg === null || msg === void 0 ? void 0 : msg.forward_from_chat) === null || _c === void 0 ? void 0 : _c.id) !== null && _d !== void 0 ? _d : (_e = msg === null || msg === void 0 ? void 0 : msg.forward_from) === null || _e === void 0 ? void 0 : _e.id) !== null && _f !== void 0 ? _f : null;
+    const originalChatTitle = (_h = (_g = msg === null || msg === void 0 ? void 0 : msg.forward_from_chat) === null || _g === void 0 ? void 0 : _g.title) !== null && _h !== void 0 ? _h : null;
     if (originalChatId) {
         console.log("forwarded from chat title:", originalChatTitle);
     }
@@ -107,12 +138,13 @@ const message_event = (ctx) => __awaiter(void 0, void 0, void 0, function* () {
     const messageId = msg.message_id;
     if (!messageId)
         return;
-    const forwardPromises = env_config_1.DESTINATION_CHAT_IDS.map((destId) => __awaiter(void 0, void 0, void 0, function* () {
+    const destinationChatIds = yield getDestinationChatIds();
+    const forwardPromises = destinationChatIds.map((destId) => __awaiter(void 0, void 0, void 0, function* () {
         try {
             yield ctx.telegram.forwardMessage(destId, chatId, messageId);
         }
         catch (error) {
-            console.error(`Failed to forward to ${destId}`, error);
+            yield handleSendError(destId, error);
         }
     }));
     yield Promise.allSettled(forwardPromises);
